@@ -376,7 +376,7 @@ class FDTD_3D:
             complex_sim = False,
             TE = False,
             staircasing = True,
-            mode_tol = 1e-1):
+            mode_tol = 1e-4):
         self.simulation_size = simulation_size
         self.step_size = step_size
         self.geometry = geometry
@@ -449,14 +449,14 @@ class FDTD_3D:
         Inv_dx = 1. / dx
         Inv_dy = 1. / dy
         Inv_dz = 1. / dz
-        epsxx = jnp.ones(Domain_shape)
-        epsyy = jnp.ones(Domain_shape)
-        epszz = jnp.ones(Domain_shape)
+        epsxx = np.ones(Domain_shape)
+        epsyy = np.ones(Domain_shape)
+        epszz = np.ones(Domain_shape)
         eps = np.ones(Domain_shape)
         eps_sub = np.ones(Domain_shape_sub)
-        sigma_exx = jnp.zeros(Domain_shape)
-        sigma_eyy = jnp.zeros(Domain_shape)
-        sigma_ezz = jnp.zeros(Domain_shape)
+        sigma_exx = np.zeros(Domain_shape)
+        sigma_eyy = np.zeros(Domain_shape)
+        sigma_ezz = np.zeros(Domain_shape)
         sigma_e = np.zeros(Domain_shape)
         sigma_h = 0
 
@@ -473,15 +473,15 @@ class FDTD_3D:
                     rectx = ((np.abs(X_axis + dx_ - ce[0]) <= si[0] / 2)
                              & (np.abs(Y_axis + dy_ - ce[1]) <= si[1] / 2)
                              & (np.abs(Z_axis + dz_ - ce[2]) <= si[2] / 2))
-                    epsxx = epsxx.at[rectx].set(g["refractive index"] ** 2)
+                    epsxx[rectx] = g["refractive index"] ** 2
                     recty = ((np.abs(X_axis + dx_ - ce[0]) <= si[0] / 2)
                              & (np.abs(Y_axis + dy_ - ce[1]) <= si[1] / 2)
                              & (np.abs(Z_axis + dz_ - ce[2]) <= si[2] / 2))
-                    epsyy = epsyy.at[recty].set(g["refractive index"] ** 2)
+                    epsyy[recty] = g["refractive index"] ** 2
                     rectz = ((np.abs(X_axis + dx_ - ce[0]) <= si[0] / 2)
                              & (np.abs(Y_axis + dy_ - ce[1]) <= si[1] / 2)
                              & (np.abs(Z_axis + dz_ - ce[2]) <= si[2] / 2))
-                    epszz = epszz.at[rectz].set(g["refractive index"] ** 2)
+                    epszz[rectz] = g["refractive index"] ** 2
 
                     rect = ((np.abs(X_axis - ce[0]) <= si[0] / 2)
                             & (np.abs(Y_axis - ce[1]) <= si[1] / 2)
@@ -496,16 +496,16 @@ class FDTD_3D:
                     rectx = ((np.abs(Xx - ce[0]) <= si[0] / 2)
                              & (np.abs(Yx - ce[1]) <= si[1] / 2)
                              & (np.abs(Zx - ce[2]) <= si[2] / 2))
-                    epsxx = epsxx.at[rectx].set(g["refractive index"] ** 2)
+                    epsxx[rectx] = g["refractive index"] ** 2
                     recty = ((np.abs(Xy - ce[0]) <= si[0] / 2)
                              & (np.abs(Yy - ce[1]) <= si[1] / 2)
                              & (np.abs(Zy - ce[2]) <= si[2] / 2))
-                    epsyy = epsyy.at[recty].set(g["refractive index"] ** 2)
+                    epsyy[recty] = g["refractive index"] ** 2
                     rectz = ((np.abs(Xz - ce[0]) <= si[0] / 2)
                              & (np.abs(Yz - ce[1]) <= si[1] / 2)
                              & (np.abs(Zz - ce[2]) <= si[2] / 2))
                     # print(rectz.shape, epszz.shape, Zz.shape)
-                    epszz = epszz.at[rectz].set(g["refractive index"] ** 2)
+                    epszz[rectz] = g["refractive index"] ** 2
                     rect = ((np.abs(X_axis - ce[0]) <= si[0] / 2)
                             & (np.abs(Y_axis - ce[1]) <= si[1] / 2)
                             & (np.abs(Z_axis - ce[2]) <= si[2] / 2))
@@ -556,22 +556,22 @@ class FDTD_3D:
                         if z_axis[i] - ce[2] >= -si[2] / 2 and z_axis[i - 1] - ce[2] < -si[2] / 2:
                             kmin = i
                         if z_axis[i] - ce[2] <= si[2] / 2 and z_axis[i + 1] - ce[2] > si[2] / 2:
-                            kmax = i
+                            kmax = i + 1
                             break
+                    g["kmin"] = kmin
+                    g["kmax"] = kmax
                     if "loss" in g:
-                        sigma_exx = sigma_exx.at[imin:imax, jmin:jmax, kmin:kmax].set(g["loss"])
-                        sigma_eyy = sigma_eyy.at[imin:imax, jmin:jmax, kmin:kmax].set(g["loss"])
-                        sigma_ezz = sigma_ezz.at[imin:imax, jmin:jmax, kmin:kmax].set(g["loss"])
+                        sigma_exx[imin:imax, jmin:jmax, kmin:kmax] = g["loss"]
+                        sigma_eyy[imin:imax, jmin:jmax, kmin:kmax] = g["loss"]
+                        sigma_ezz[imin:imax, jmin:jmax, kmin:kmax] = g["loss"]
 
                     for i in range(1, len(i_list)):
                         for j in range(1, len(j_list)):
-                            epsxx = epsxx.at[i_list[i - 1]:i_list[i], j_list[j - 1]:j_list[j],kmin:kmax].set(density_to_perm(
-                                g["grid"][i - 1, j - 1], g["ri min"] ** 2, g["ri max"] ** 2))
-                            epsyy = epsyy.at[i_list[i - 1]:i_list[i], j_list[j - 1]:j_list[j],kmin:kmax].set(density_to_perm(
-                                g["grid"][i - 1, j - 1], g["ri min"] ** 2, g["ri max"] ** 2))
-                            epszz = epszz.at[i_list[i - 1]:i_list[i], j_list[j - 1]:j_list[j],kmin:kmax].set(density_to_perm(
-                                g["grid"][i - 1, j - 1], g["ri min"] ** 2, g["ri max"] ** 2))
+                            epsxx[i_list[i - 1]:i_list[i], j_list[j - 1]:j_list[j],kmin:kmax] = density_to_perm(g["grid"][i - 1, j - 1], g["ri min"] ** 2, g["ri max"] ** 2)
+                            epsyy[i_list[i - 1]:i_list[i], j_list[j - 1]:j_list[j],kmin:kmax] = density_to_perm(g["grid"][i - 1, j - 1], g["ri min"] ** 2, g["ri max"] ** 2)
+                            epszz[i_list[i - 1]:i_list[i], j_list[j - 1]:j_list[j],kmin:kmax] = density_to_perm(g["grid"][i - 1, j - 1], g["ri min"] ** 2, g["ri max"] ** 2)
                     design_grid += [g]
+
                 else:
                     nx, ny = g["grid"].shape
                     imin = 0
@@ -644,7 +644,7 @@ class FDTD_3D:
                     # print("valsx")
                     # valsx = gridderx(eps_)
                     # jacx = jacobian(gridderx,0)(eps_)
-                    epsxx = epsxx.at[imin:imax + 1, jmin:jmax + 1, kmin:kmax + 1].set(jnp.repeat(valsx.reshape(len(x_gx), len(y_gx),1),kmax - kmin + 1, axis = 2))
+                    epsxx[imin:imax + 1, jmin:jmax + 1, kmin:kmax + 1] = np.repeat(valsx.reshape(len(x_gx), len(y_gx), 1),kmax - kmin + 1, axis = 2)
                     g["iminx"] = imin
                     g["imaxx"] = imax + 1
                     g["jminx"] = jmin
@@ -685,7 +685,7 @@ class FDTD_3D:
 
                     valsy, jacy = vjp(griddery, eps_)  #
                     # valsy = griddery(eps_)
-                    epsyy = epsyy.at[imin:imax + 1, jmin:jmax + 1, kmin:kmax + 1].set(jnp.repeat(valsy.reshape(len(x_gy), len(y_gy),1),kmax - kmin + 1, axis = 2))
+                    epsyy[imin:imax + 1, jmin:jmax + 1, kmin:kmax + 1] = np.repeat(valsy.reshape(len(x_gy), len(y_gy),1),kmax - kmin + 1, axis = 2)
                     # jacy = jacobian(griddery,0)(eps_)
 
                     # print((len(x_gy), len(y_gy)))
@@ -729,7 +729,7 @@ class FDTD_3D:
 
                     valsz, jacz = vjp(gridderz, eps_)
                     # valsz = gridderz(eps_)
-                    epszz = epszz.at[imin:imax + 1, jmin:jmax + 1, kmin:kmax + 1].set(jnp.repeat(valsz.reshape(len(x_gz), len(y_gz),1),kmax - kmin + 1, axis = 2))
+                    epszz[imin:imax + 1, jmin:jmax + 1, kmin:kmax + 1] = np.repeat(valsz.reshape(len(x_gz), len(y_gz),1),kmax - kmin + 1, axis = 2)
                     # jacz = jacobian(gridderz,0)(eps_)
                     g["iminz"] = imin
                     g["imaxz"] = imax + 1
@@ -740,13 +740,13 @@ class FDTD_3D:
                     g["jacz"] = jacz
 
                     if "loss" in g:
-                        sigma_exx = sigma_exx.at[g["iminx"]:g["imaxx"], g["jminx"]:g["imaxx"], g["kminx"]:g["kmaxx"]].set(g["loss"])
-                        sigma_eyy = sigma_eyy.at[g["iminy"]:g["imaxy"], g["jminy"]:g["imaxy"], g["kminy"]:g["kmaxy"]].set(g["loss"])
-                        sigma_ezz = sigma_ezz.at[g["iminz"]:g["imaxz"], g["jminz"]:g["imaxz"], g["kminz"]:g["kmaxz"]].set(g["loss"])
+                        sigma_exx[g["iminx"]:g["imaxx"], g["jminx"]:g["imaxx"], g["kminx"]:g["kmaxx"]] = g["loss"]
+                        sigma_eyy[g["iminy"]:g["imaxy"], g["jminy"]:g["imaxy"], g["kminy"]:g["kmaxy"]] = g["loss"]
+                        sigma_ezz[g["iminz"]:g["imaxz"], g["jminz"]:g["imaxz"], g["kminz"]:g["kmaxz"]] = g["loss"]
 
                     design_grid += [g]
 
-        plt.contourf(x_axis_sub * 1e6, y_axis_sub * 1e6, eps_sub[:,:,Nz//2].transpose(), 200)
+        plt.contourf(x_axis_sub * 1e6, y_axis_sub * 1e6, eps_sub[:,:,Nz].transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
         plt.savefig("sim.png")
@@ -767,6 +767,46 @@ class FDTD_3D:
         plt.savefig("simzz.png")
         plt.close()
 
+        plt.contourf(x_axis * 1e6, z_axis * 1e6, epsxx[:,Ny//2,:].transpose(), 200)
+        plt.xlabel("x [um]")
+        plt.ylabel("z [um]")
+        plt.savefig("simxx_xz.png")
+        plt.close()
+        plt.contourf(y_axis * 1e6, z_axis * 1e6, epsxx[Nx//2,:,:].transpose(), 200)
+        plt.xlabel("y [um]")
+        plt.ylabel("z [um]")
+        plt.savefig("simxx_yz.png")
+        plt.close()
+
+        plt.contourf(x_axis * 1e6, z_axis * 1e6, epsyy[:,Ny//2,:].transpose(), 200)
+        plt.xlabel("x [um]")
+        plt.ylabel("z [um]")
+        plt.savefig("simyy_xz.png")
+        plt.close()
+        plt.contourf(y_axis * 1e6, z_axis * 1e6, epsyy[Nx//2,:,:].transpose(), 200)
+        plt.xlabel("y [um]")
+        plt.ylabel("z [um]")
+        plt.savefig("simyy_yz.png")
+        plt.close()
+
+        plt.contourf(x_axis * 1e6, z_axis * 1e6, epszz[:,Ny//2,:].transpose(), 200)
+        plt.xlabel("x [um]")
+        plt.ylabel("z [um]")
+        plt.savefig("simzz_xz.png")
+        plt.close()
+        plt.contourf(y_axis * 1e6, z_axis * 1e6, epszz[Nx//2,:,:].transpose(), 200)
+        plt.xlabel("y [um]")
+        plt.ylabel("z [um]")
+        plt.savefig("simzz_yz.png")
+        plt.close()
+
+        epsxx = jnp.array(epsxx)
+        epsyy = jnp.array(epsyy)
+        epszz = jnp.array(epszz)
+
+        sigma_exx = jnp.array(sigma_exx)
+        sigma_eyy = jnp.array(sigma_eyy)
+        sigma_ezz = jnp.array(sigma_ezz)
         for s in self.source:
             if not "pulse width" in s:
                 pulse_width = 10e-15
@@ -1084,6 +1124,7 @@ class FDTD_3D:
 
             dx_ = 0.25 * dx
             dy_ = 0.25 * dy
+            dz_ = 0.25 * dz
 
             if dft["type"] == "design" and not self.staircasing:
                 iminx = design_grid[0]["iminx"]
@@ -1136,6 +1177,15 @@ class FDTD_3D:
                 imax = imin + int(round(si[0] / dx))
                 jmin = np.argmin(np.abs(y_axis + dy_ - ce[1] + si[1] / 2))
                 jmax = jmin + int(round(si[1] / dy))
+                
+                if dft["type"] == "design":
+                    kmin = design_grid[0]["kmin"]
+                    kmax = design_grid[0]["kmax"]
+                else:
+                    kmin = np.argmin(np.abs(z_axis + dz_ - ce[2] + si[2] / 2))
+                    kmax = kmin + max([int(round(si[2] / dz)),1])
+
+
                 dft["iminx"] = imin
                 dft["imaxx"] = imax
                 dft["jminx"] = jmin
@@ -1315,7 +1365,7 @@ class FDTD_3D:
                     print("Electric field below threshold, breaking")
                     break
 
-            if n % 100 == 0:
+            if n % 1000 == 0:
                 print(n, jnp.max(np.abs(Ex)), jnp.max(np.abs(Ey)), jnp.max(np.abs(Ez)), max_field, mf / max_field)
 
             if n % self.movie_update == 0:
