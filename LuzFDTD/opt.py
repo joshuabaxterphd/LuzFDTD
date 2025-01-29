@@ -8,6 +8,7 @@ from .FDTD2D import c0, eps0, FDTD_2D
 from .FDTD2D_jax import FDTD_2D as FDTD_2D_jax
 from .FDTD3D_jax import FDTD_3D as FDTD_3D_jax
 import inspect
+import jax.numpy as jnp
 
 def update_parameters_with_adam(x, grads, s, v,
                                 t, learning_rate=0.01,
@@ -23,7 +24,8 @@ def update_parameters_with_adam(x, grads, s, v,
 class LuzOpt:
     def __init__(self, sim, objective, design_region, design_wavelengths, pw_adj = 10e-15, with_jax = False):
 
-        self.ThreeD = False      
+        self.ThreeD = False
+        self.with_jax = with_jax
         self.adj_sim = None
         self.adj_source = []
         self.sim = sim
@@ -88,17 +90,13 @@ class LuzOpt:
                 phase_corr =  0.5 * neff *  dx * fr["omegas"] / c0
             amps.append(trans)
 
-        print(amps)
         adj_amps = gradient_function(*amps)
         adj_amps = np.nan_to_num(adj_amps)
 
-        print(amps)
-        print(adj_amps)
-
         FOM = self.objective(*amps)
-        print(FOM)
 
         if self.adj_sim is None:
+            self.adj_source = []
             for f,fr in enumerate(flux_region):
                 for w,wl in enumerate(self.design_wavelengths):
                     ome = 2 * np.pi * c0 / wl
@@ -161,7 +159,7 @@ class LuzOpt:
                     adj_phs = np.angle(adj_amps[f,w]) + phase_corr
                     self.adj_sim.source[id]["amplitude"] = adj_amp
                     self.adj_sim.source[id]["phase"] = adj_phs
-
+                    id += 1
         if self.adj_sim is None:
             if self.ThreeD:
                 print("Adjoint sim")
@@ -175,7 +173,7 @@ class LuzOpt:
                                    movie_update=100, staircasing=self.sim.staircasing)
 
             else:
-                if with_jax:
+                if self.with_jax:
                     print("Adjoint sim")
                     self.adj_sim = FDTD_2D_jax(self.sim.simulation_size,
                                        self.sim.step_size,
@@ -183,28 +181,30 @@ class LuzOpt:
                                        geometry = self.sim.geometry,
                                        flux_region=[],
                                        dft_region = copy.deepcopy(self.adj_design_region),
-                                       cutoff = sim.cutoff,
-                                       movie_update=100, TE = TE, staircasing=sim.staircasing)
+                                       cutoff = self.sim.cutoff,
+                                       movie_update=100, TE = self.sim.TE, staircasing=self.sim.staircasing)
                 else:
-                    self.adj_sim = FDTD_2D(sim.simulation_size,
+                    self.adj_sim = FDTD_2D(self.sim.simulation_size,
                                        self.sim.step_size,
                                        source=self.adj_source,
                                        geometry = self.sim.geometry,
                                        flux_region=[],
                                        dft_region = copy.deepcopy(self.adj_design_region),
                                        cutoff = self.sim.cutoff,
-                                       movie_update=100, TE = TE, staircasing=self.sim.staircasing)
+                                       movie_update=100, TE = self.sim.TE, staircasing=self.sim.staircasing)
         
         self.adj_sim.geometry[-1]["grid"] = grid.copy()
         E_movie, _, dft_adj, design_grid = self.adj_sim.run()
 
-        omega = dft_fwd[0]["omegas"]
         Exg = dft_fwd[0]["Ex"]
         Eyg = dft_fwd[0]["Ey"]
         Ezg = dft_fwd[0]["Ez"]
         Exga = dft_adj[0]["Ex"]
         Eyga = dft_adj[0]["Ey"]
         Ezga = dft_adj[0]["Ez"]
+
+        # plt.imshow(Eyga[0].real)
+        # plt.show()
 
         if not self.sim.staircasing:
             jacx = design_grid[0]["jacx"]
@@ -216,6 +216,7 @@ class LuzOpt:
                 omega_ = 2 * np.pi * c0 / wl
                 phase_fact = np.exp(-1j * dt * omega_ * 0.5)
                 if len(Exg[w].shape) == 2:
+                    print("here")
                     gradient_x = -(1j * omega_ * phase_fact * eps0 * Exg[w] * Exga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2))
                     gradient_y = -(1j * omega_ * phase_fact * eps0 * Eyg[w] * Eyga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2))
                     gradient_z = -(1j * omega_ * phase_fact * eps0 * Ezg[w] * Ezga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2))
@@ -285,3 +286,149 @@ def fd_step(sim, design_region, design_wavelengths,
     grad_tot = np.array(grad_tot)
 
     return grad_tot.reshape(grid_shape)
+
+
+def indicator_solid(x, c, filter_f, threshold_f, resolution):
+    '''Calculates the indicator function for the void phase needed for minimum length optimization [1].
+
+    Parameters
+    ----------
+    x : array_like
+        Design parameters
+    c : float
+        Decay rate parameter (1e0 - 1e8)
+    eta_e : float
+        Erosion threshold limit (0-1)
+    filter_f : function_handle
+        Filter function. Must be differntiable by autograd.
+    threshold_f : function_handle
+        Threshold function. Must be differntiable by autograd.
+
+    Returns
+    -------
+    array_like
+        Indicator value
+
+    References
+    ----------
+    [1] Zhou, M., Lazarov, B. S., Wang, F., & Sigmund, O. (2015). Minimum length scale in topology optimization by
+    geometric constraints. Computer Methods in Applied Mechanics and Engineering, 293, 266-282.
+    '''
+
+    filtered_field = filter_f(x)
+    design_field = threshold_f(filtered_field)
+    gradient_filtered_field = jnp.gradient(filtered_field)
+    grad_mag = (gradient_filtered_field[0] * resolution) ** 2 + (gradient_filtered_field[1] * resolution) ** 2
+    if grad_mag.ndim != 2:
+        raise ValueError("The gradient fields must be 2 dimensional. Check input array and filter functions.")
+    I_s = design_field * jnp.exp(-c * grad_mag)
+    return I_s
+
+def constraint_solid(x, c, eta_e, filter_f, threshold_f, resolution):
+    '''Calculates the constraint function of the solid phase needed for minimum length optimization [1].
+
+    Parameters
+    ----------
+    x : array_like
+        Design parameters
+    c : float
+        Decay rate parameter (1e0 - 1e8)
+    eta_e : float
+        Erosion threshold limit (0-1)
+    filter_f : function_handle
+        Filter function. Must be differntiable by autograd.
+    threshold_f : function_handle
+        Threshold function. Must be differntiable by autograd.
+
+    Returns
+    -------
+    float
+        Constraint value
+
+    Example
+    -------
+    >> g_s = constraint_solid(x,c,eta_e,filter_f,threshold_f) # constraint
+    >> g_s_grad = grad(constraint_solid,0)(x,c,eta_e,filter_f,threshold_f) # gradient
+
+    References
+    ----------
+    [1] Zhou, M., Lazarov, B. S., Wang, F., & Sigmund, O. (2015). Minimum length scale in topology optimization by
+    geometric constraints. Computer Methods in Applied Mechanics and Engineering, 293, 266-282.
+    '''
+
+    filtered_field = filter_f(x)
+    I_s = indicator_solid(x.reshape(filtered_field.shape), c, filter_f, threshold_f, resolution).flatten()
+    return jnp.mean(I_s * jnp.minimum(filtered_field.flatten() - eta_e, 0) ** 2)
+
+
+def indicator_void(x, c, filter_f, threshold_f, resolution):
+    '''Calculates the indicator function for the void phase needed for minimum length optimization [1].
+
+    Parameters
+    ----------
+    x : array_like
+        Design parameters
+    c : float
+        Decay rate parameter (1e0 - 1e8)
+    eta_d : float
+        Dilation threshold limit (0-1)
+    filter_f : function_handle
+        Filter function. Must be differntiable by autograd.
+    threshold_f : function_handle
+        Threshold function. Must be differntiable by autograd.
+
+    Returns
+    -------
+    array_like
+        Indicator value
+
+    References
+    ----------
+    [1] Zhou, M., Lazarov, B. S., Wang, F., & Sigmund, O. (2015). Minimum length scale in topology optimization by
+    geometric constraints. Computer Methods in Applied Mechanics and Engineering, 293, 266-282.
+    '''
+
+    filtered_field = filter_f(x).reshape(x.shape)
+    design_field = threshold_f(filtered_field)
+    gradient_filtered_field = jnp.gradient(filtered_field)
+    grad_mag = (gradient_filtered_field[0] * resolution) ** 2 + (gradient_filtered_field[1] * resolution) ** 2
+    if grad_mag.ndim != 2:
+        raise ValueError("The gradient fields must be 2 dimensional. Check input array and filter functions.")
+    return (1 - design_field) * jnp.exp(-c * grad_mag)
+
+
+def constraint_void(x, c, eta_d, filter_f, threshold_f, resolution):
+    '''Calculates the constraint function of the void phase needed for minimum length optimization [1].
+
+    Parameters
+    ----------
+    x : array_like
+        Design parameters
+    c : float
+        Decay rate parameter (1e0 - 1e8)
+    eta_d : float
+        Dilation threshold limit (0-1)
+    filter_f : function_handle
+        Filter function. Must be differntiable by autograd.
+    threshold_f : function_handle
+        Threshold function. Must be differntiable by autograd.
+
+    Returns
+    -------
+    float
+        Constraint value
+
+    Example
+    -------
+    >> g_v = constraint_void(p,c,eta_d,filter_f,threshold_f) # constraint
+    >> g_v_grad = tensor_jacobian_product(constraint_void,0)(p,c,eta_d,filter_f,threshold_f,g_s) # gradient
+
+    References
+    ----------
+    [1] Zhou, M., Lazarov, B. S., Wang, F., & Sigmund, O. (2015). Minimum length scale in topology optimization by
+    geometric constraints. Computer Methods in Applied Mechanics and Engineering, 293, 266-282.
+    '''
+
+    filtered_field = filter_f(x)
+    I_v = indicator_void(x.reshape(filtered_field.shape), c, filter_f, threshold_f, resolution).flatten()
+    return jnp.mean(I_v * jnp.minimum(eta_d - filtered_field.flatten(), 0) ** 2)
