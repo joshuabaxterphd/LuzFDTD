@@ -13,6 +13,7 @@ from jax import vjp
 from .mode_solver import Mode_Solver
 import functools
 import time as time_mod
+import os
 
 eps0 = 8.8541878128e-12 # permittivity of free space
 mu0 = 1.256637062e-6 # permeability of free space
@@ -647,30 +648,30 @@ class FDTD_2D:
         epsyy = jnp.array(epsyy)
         epszz = jnp.array(epszz)
 
+        try:
+            os.mkdir("simulation_images")
+        except:
+            print("overwriting images in simulation_images")
+
         plt.contourf(x_axis_sub * 1e6, y_axis_sub * 1e6, eps_sub.transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
-        plt.savefig("sim.png")
+        plt.savefig("simulation_images/sim.png")
         plt.close()
         plt.contourf(x_axis * 1e6, y_axis * 1e6, epsxx.transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
-        plt.savefig("simxx.png")
+        plt.savefig("simulation_images/simxx.png")
         plt.close()
         plt.contourf(x_axis * 1e6, y_axis * 1e6, epsyy.transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
-        plt.savefig("simyy.png")
+        plt.savefig("simulation_images/simyy.png")
         plt.close()
         plt.contourf(x_axis * 1e6, y_axis * 1e6, epszz.transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
-        plt.savefig("simzz.png")
-        plt.close()
-
-        plt.imshow(epsxx - np.flip(epsxx, axis=1))
-        plt.colorbar()
-        plt.savefig("simzxxflip.png")
+        plt.savefig("simulation_images/simzz.png")
         plt.close()
 
         for s in self.source:
