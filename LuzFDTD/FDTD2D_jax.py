@@ -308,6 +308,11 @@ def update_E_TM(Ex, Ey, Ez, Hx, Hy, Hz, e_coeff_1x, e_coeff_1y, e_coeff_1z, e_co
 
     return Ex, Ey, psi_Exy, psi_Eyx
 
+@functools.partial(jax.jit, static_argnums=(3,4,5,6))
+def get_movie_frame(Ex, Ey, Ez, imin, imax, jmin, jmax):
+    return jnp.sqrt(Ex[imin:imax,jmin:jmax] ** 2 + Ey[imin:imax,jmin:jmax] ** 2 + Ez[imin:imax,jmin:jmax] ** 2)
+                    
+
 class FDTD_2D:
     def __init__(self, simulation_size, step_size,
             geometry = [],
@@ -316,12 +321,13 @@ class FDTD_2D:
             cutoff = 1e-4 ,
             dft_region = [],
             flux_region = [],
+            movie_region = [],
             courant = 0.5,
             movie_update = 10,
             n_cells_pml = 10,
             complex_sim = False,
             TE = False,
-            staircasing = True):
+            staircasing = False):
         self.simulation_size = simulation_size
         self.step_size = step_size
         self.geometry = geometry
@@ -330,6 +336,7 @@ class FDTD_2D:
         self.cutoff = cutoff
         self.dft_region = dft_region
         self.flux_region = flux_region
+        self.movie_region = movie_region
         self.courant = courant
         self.movie_update = movie_update
         self.n_cells_pml = n_cells_pml
@@ -896,6 +903,21 @@ class FDTD_2D:
 
         probe = []
 
+        for movie in self.movie_region:
+            ce = movie["center"]
+            si = movie["size"]
+            imin = np.argmin(np.abs(x_axis - (ce[0] - si[0] / 2)))
+            imax = np.argmin(np.abs(x_axis - (ce[0] + si[0] / 2)))
+            jmin = np.argmin(np.abs(y_axis - (ce[1] - si[1] / 2)))
+            jmax = np.argmin(np.abs(y_axis - (ce[1] + si[1] / 2)))
+            movie["imin"] = imin               
+            movie["imax"] = imax
+            movie["jmin"] = jmin
+            movie["jmax"] = jmax
+            movie["E"] = np.zeros([int(np.ceil(N_time_steps / self.movie_update)), imax - imin, jmax - jmin], dtype=real_type)
+
+
+
         for dft in self.dft_region:
             ce = dft["center"]
             si = dft["size"]
@@ -1069,6 +1091,11 @@ class FDTD_2D:
                                                                                fr["imin"], fr["imax"], fr["jmin"],
                                                                                fr["jmax"])
 
+                if n % self.movie_update == 0:
+                    for movie in self.movie_region:
+                        movie["E"][int(round(n / self.movie_update))] = get_movie_frame(Ex, Ey, Ez, movie["imin"], movie["imax"], 
+                                                                                               movie["jmin"], movie["jmax"])
+
                 mf = jnp.sqrt(jnp.max(jnp.abs(Ex) ** 2 + jnp.abs(Ey) ** 2 + jnp.abs(Ez) ** 2))
                 if mf > max_field:
                     max_field = mf
@@ -1082,8 +1109,6 @@ class FDTD_2D:
                 if n % 100 == 0:
                     print(n, jnp.max(np.abs(Ex)), jnp.max(np.abs(Ey)), jnp.max(np.abs(Ez)), max_field, mf / max_field)
 
-                if n % self.movie_update == 0:
-                    E_movie.append(Ex ** 2 + Ey ** 2 + Ez ** 2)
         else:
             for n in range(N_time_steps):
                 time = (n + 1) * dt
@@ -1161,6 +1186,12 @@ class FDTD_2D:
                                                                                fr["imin"], fr["imax"], fr["jmin"],
                                                                                fr["jmax"])
 
+                if n % self.movie_update == 0:
+                    for movie in self.movie_region:
+                        movie["E"][int(round(n / self.movie_update))] = get_movie_frame(Ex, Ey, Ez, movie["imin"], movie["imax"], 
+                                                                                               movie["jmin"], movie["jmax"])
+
+
                 mf = jnp.sqrt(jnp.max(jnp.abs(Ex) ** 2 + jnp.abs(Ey) ** 2 + jnp.abs(Ez) ** 2))
                 if mf > max_field:
                     max_field = mf
@@ -1174,8 +1205,6 @@ class FDTD_2D:
                 if n % 100 == 0:
                     print(n, jnp.max(np.abs(Ex)), jnp.max(np.abs(Ey)), jnp.max(np.abs(Ez)), max_field, mf / max_field)
 
-                if n % self.movie_update == 0:
-                    E_movie.append(Ex ** 2 + Ey ** 2 + Ez ** 2)
         end = time_mod.time()
         print(f"Simulation took {end - begin} seconds")
         print(f"Simulation took {(end - begin) / n} seconds per step")
@@ -1268,6 +1297,6 @@ class FDTD_2D:
                                                          fr['mode Ez'], fr['mode Ex'], -fr['mode Hz'],
                                                          -fr['mode Hx'])
         if len(design_grid) > 0:
-            return E_movie, self.flux_region, self.dft_region, design_grid
+            return self.movie_region, self.flux_region, self.dft_region, design_grid
         else:
-            return E_movie, self.flux_region, self.dft_region
+            return self.movie_region, self.flux_region, self.dft_region

@@ -22,7 +22,7 @@ def update_parameters_with_adam(x, grads, s, v,
     return x, s, v
 
 class LuzOpt:
-    def __init__(self, sim, objective, design_region, design_wavelengths, pw_adj = 10e-15, with_jax = False):
+    def __init__(self, sim, objective, design_region, design_wavelengths, pw_adj = 10e-15, with_jax = False, adj_sim_per_wl = False):
 
         self.ThreeD = False
         self.with_jax = with_jax
@@ -38,7 +38,7 @@ class LuzOpt:
         self.adj_design_region = copy.deepcopy(design_region)
         self.design_freqs = c0 / design_wavelengths
         self.pw_adj = pw_adj
-        if len(self.design_wavelengths) > 1:
+        if len(self.design_wavelengths) > 1 and not adj_sim_per_wl:
             dfs = np.abs(np.diff(self.design_freqs))
             min_df = np.min(dfs)
             self.pw_adj = 2./min_df
@@ -49,9 +49,11 @@ class LuzOpt:
                 self.ThreeD = True
 
         self.objective = objective
+        self.adj_sim_per_wl = adj_sim_per_wl
 
-    def opt_step(self, grid):
+    def opt_step(self, grid, loss = 0):
         self.sim.geometry[-1]['grid'] = grid.copy()
+        self.sim.geometry[-1]['loss'] = loss
         num_args = len(inspect.signature(self.objective).parameters)
         argnums = tuple([i for i in range(num_args)])
         gradient_function = grad_jax(self.objective, argnums=argnums)
@@ -97,8 +99,10 @@ class LuzOpt:
 
         if self.adj_sim is None:
             self.adj_source = []
-            for f,fr in enumerate(flux_region):
-                for w,wl in enumerate(self.design_wavelengths):
+            self.adj_source_wl = []
+            for w,wl in enumerate(self.design_wavelengths): 
+                adj_source_ = []
+                for f,fr in enumerate(flux_region):
                     ome = 2 * np.pi * c0 / wl
                     neff = fr["mode index"][w]
                     if fr["direction"] == "+y":
@@ -129,72 +133,165 @@ class LuzOpt:
                     self.adj_source.append({"type":"adjmode","size":adj_source_size,"center":adj_source_center, "mode": fr["mode"],
                                    "wavelength":wl, "pulse width": self.pw_adj,
                                    "direction":new_dir, "amplitude":adj_amp, "phase": adj_phs})
-        else:
-            id = 0
-            for f,fr in enumerate(flux_region):
-                for w,wl in enumerate(self.design_wavelengths):
-                    ome = 2 * np.pi * c0 / wl
-                    neff = fr["mode index"][w]
-                    if fr["direction"] == "+y":
-                        fact = 1
-                        new_dir = "-y"
-                        phase_corr = - 0.5 * neff * dy * ome/ c0
+                    adj_source_.append({"type":"adjmode","size":adj_source_size,"center":adj_source_center, "mode": fr["mode"],
+                                   "wavelength":wl, "pulse width": self.pw_adj,
+                                   "direction":new_dir, "amplitude":adj_amp, "phase": adj_phs})
+                self.adj_source_wl.append(adj_source_)
 
-                    if fr["direction"] == "-y":
-                        fact = -1
-                        new_dir = "+y"
-                        phase_corr =  0.5 * neff *  dy * ome / c0
-
-                    if fr["direction"] == "+x":
-                        fact = 1
-                        new_dir = "-x"
-                        phase_corr = - 0.5 * neff *  dx * ome / c0
-
-                    if fr["direction"] == "-x":
-                        fact = -1
-                        new_dir = "+x"
-                        phase_corr =  0.5 * neff *  dx * ome / c0
-
-                    adj_amp = np.abs(adj_amps[f,w]) * fact
-                    adj_phs = np.angle(adj_amps[f,w]) + phase_corr
-                    self.adj_sim.source[id]["amplitude"] = adj_amp
-                    self.adj_sim.source[id]["phase"] = adj_phs
-                    id += 1
-        if self.adj_sim is None:
-            if self.ThreeD:
-                print("Adjoint sim")
-                self.adj_sim = FDTD_3D_jax(self.sim.simulation_size,
-                                   self.sim.step_size,
-                                   source=self.adj_source,
-                                   geometry = self.sim.geometry,
-                                   flux_region=[],
-                                   dft_region = copy.deepcopy(self.adj_design_region),
-                                   cutoff = self.sim.cutoff,
-                                   movie_update=100, staircasing=self.sim.staircasing)
-
-            else:
-                if self.with_jax:
+            adj_source_ = None
+            if not self.adj_sim_per_wl:
+                if self.ThreeD:     
                     print("Adjoint sim")
-                    self.adj_sim = FDTD_2D_jax(self.sim.simulation_size,
+                    self.adj_sim = FDTD_3D_jax(self.sim.simulation_size,
                                        self.sim.step_size,
                                        source=self.adj_source,
                                        geometry = self.sim.geometry,
                                        flux_region=[],
                                        dft_region = copy.deepcopy(self.adj_design_region),
                                        cutoff = self.sim.cutoff,
-                                       movie_update=100, TE = self.sim.TE, staircasing=self.sim.staircasing)
+                                       movie_update=100, staircasing=self.sim.staircasing)
+
                 else:
-                    self.adj_sim = FDTD_2D(self.sim.simulation_size,
-                                       self.sim.step_size,
-                                       source=self.adj_source,
-                                       geometry = self.sim.geometry,
-                                       flux_region=[],
-                                       dft_region = copy.deepcopy(self.adj_design_region),
-                                       cutoff = self.sim.cutoff,
-                                       movie_update=100, TE = self.sim.TE, staircasing=self.sim.staircasing)
+                    if self.with_jax:
+                        print("Adjoint sim")
+                        self.adj_sim = FDTD_2D_jax(self.sim.simulation_size,
+                                           self.sim.step_size,
+                                           source=self.adj_source,
+                                           geometry = self.sim.geometry,
+                                           flux_region=[],
+                                           dft_region = copy.deepcopy(self.adj_design_region),
+                                           cutoff = self.sim.cutoff,
+                                           movie_update=100, TE = self.sim.TE, staircasing=self.sim.staircasing)
+                    else:
+                        self.adj_sim = FDTD_2D(self.sim.simulation_size,
+                                           self.sim.step_size,
+                                           source=self.adj_source,
+                                           geometry = self.sim.geometry,
+                                           flux_region=[],
+                                           dft_region = copy.deepcopy(self.adj_design_region),
+                                           cutoff = self.sim.cutoff,
+                                           movie_update=100, TE = self.sim.TE, staircasing=self.sim.staircasing)
+            else:
+                self.adj_sim = []   
+                for w, wl in enumerate(self.design_wavelengths):
+                    adj_dr = self.adj_design_region
+                    adj_dr[0]["wavelengths"] = np.array([wl])
+                    if self.ThreeD:             
+                        print("Adjoint sim")
+                        self.adj_sim.append(FDTD_3D_jax(self.sim.simulation_size,
+                                           self.sim.step_size,
+                                           source=self.adj_source_wl[w],
+                                           geometry = self.sim.geometry,
+                                           flux_region=[],
+                                           dft_region = copy.deepcopy(adj_dr),
+                                           cutoff = self.sim.cutoff,
+                                           movie_update=100, staircasing=self.sim.staircasing))
+
+                    else:
+                        if self.with_jax:
+                            print("Adjoint sim")
+                            self.adj_sim.append(FDTD_2D_jax(self.sim.simulation_size,
+                                               self.sim.step_size,
+                                               source=self.adj_source_wl[w],
+                                               geometry = self.sim.geometry,
+                                               flux_region=[],
+                                               dft_region = copy.deepcopy(adj_dr),
+                                               cutoff = self.sim.cutoff,
+                                               movie_update=100, TE = self.sim.TE, staircasing=self.sim.staircasing))
+                        else:
+                            self.adj_sim.append(FDTD_2D(self.sim.simulation_size,
+                                               self.sim.step_size,
+                                               source=self.adj_source_wl[w],
+                                               geometry = self.sim.geometry,
+                                               flux_region=[],
+                                               dft_region = copy.deepcopy(adj_dr),
+                                               cutoff = self.sim.cutoff,
+                                               movie_update=100, TE = self.sim.TE, staircasing=self.sim.staircasing))
+        else:
+            if not self.adj_sim_per_wl:
+                id = 0
+                for f,fr in enumerate(flux_region):
+                    for w,wl in enumerate(self.design_wavelengths):
+                        ome = 2 * np.pi * c0 / wl
+                        neff = fr["mode index"][w]
+                        if fr["direction"] == "+y":
+                            fact = 1
+                            new_dir = "-y"
+                            phase_corr = - 0.5 * neff * dy * ome/ c0
+
+                        if fr["direction"] == "-y":
+                            fact = -1
+                            new_dir = "+y"
+                            phase_corr =  0.5 * neff *  dy * ome / c0
+
+                        if fr["direction"] == "+x":
+                            fact = 1
+                            new_dir = "-x"
+                            phase_corr = - 0.5 * neff *  dx * ome / c0
+
+                        if fr["direction"] == "-x":
+                            fact = -1
+                            new_dir = "+x"
+                            phase_corr =  0.5 * neff *  dx * ome / c0
+
+                        adj_amp = np.abs(adj_amps[f,w]) * fact
+                        adj_phs = np.angle(adj_amps[f,w]) + phase_corr
+                        self.adj_sim.source[id]["amplitude"] = adj_amp
+                        self.adj_sim.source[id]["phase"] = adj_phs
+                        id += 1
+            else:
+                for w,wl in enumerate(self.design_wavelengths): 
+                    id = 0              
+                    for f,fr in enumerate(flux_region):
+                        ome = 2 * np.pi * c0 / wl
+                        neff = fr["mode index"][w]
+                        if fr["direction"] == "+y":
+                            fact = 1
+                            new_dir = "-y"
+                            phase_corr = - 0.5 * neff * dy * ome/ c0
+
+                        if fr["direction"] == "-y":
+                            fact = -1
+                            new_dir = "+y"
+                            phase_corr =  0.5 * neff *  dy * ome / c0
+
+                        if fr["direction"] == "+x":
+                            fact = 1
+                            new_dir = "-x"
+                            phase_corr = - 0.5 * neff *  dx * ome / c0
+
+                        if fr["direction"] == "-x":
+                            fact = -1
+                            new_dir = "+x"
+                            phase_corr =  0.5 * neff *  dx * ome / c0
+
+                        adj_amp = np.abs(adj_amps[f,w]) * fact
+                        adj_phs = np.angle(adj_amps[f,w]) + phase_corr
+                        self.adj_sim[w].source[id]["amplitude"] = adj_amp
+                        self.adj_sim[w].source[id]["phase"] = adj_phs
+                        id += 1
+
+
+        # if self.adj_sim is None:
         
-        self.adj_sim.geometry[-1]["grid"] = grid.copy()
-        E_movie, _, dft_adj, design_grid = self.adj_sim.run()
+        if not self.adj_sim_per_wl:
+            self.adj_sim.geometry[-1]["grid"] = grid.copy()
+            E_movie, _, dft_adj, design_grid = self.adj_sim.run()
+        else:
+            dft_adj = []
+            for ads in self.adj_sim:
+                ads.geometry[-1]["grid"] = grid.copy()
+                E_movie, _, dft_adj_, design_grid = ads.run()
+                dft_adj.append(dft_adj_)
+
+            dft_adj[0][0]["Ex"] = np.array(dft_adj[0][0]["Ex"]).repeat(2,0)
+            dft_adj[0][0]["Ey"] = np.array(dft_adj[0][0]["Ey"]).repeat(2,0)
+            dft_adj[0][0]["Ez"] = np.array(dft_adj[0][0]["Ez"]).repeat(2,0)
+            dft_adj[0][0]["Ex"][1] = np.array(dft_adj[1][0]["Ex"][0])
+            dft_adj[0][0]["Ey"][1] = np.array(dft_adj[1][0]["Ey"][0])
+            dft_adj[0][0]["Ez"][1] = np.array(dft_adj[1][0]["Ez"][0])
+            dft_adj = dft_adj[0]
+
 
         Exg = dft_fwd[0]["Ex"]
         Eyg = dft_fwd[0]["Ey"]
@@ -216,14 +313,25 @@ class LuzOpt:
                 omega_ = 2 * np.pi * c0 / wl
                 phase_fact = np.exp(-1j * dt * omega_ * 0.5)
                 if len(Exg[w].shape) == 2:
-                    print("here")
                     gradient_x = -(1j * omega_ * phase_fact * eps0 * Exg[w] * Exga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2))
                     gradient_y = -(1j * omega_ * phase_fact * eps0 * Eyg[w] * Eyga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2))
                     gradient_z = -(1j * omega_ * phase_fact * eps0 * Ezg[w] * Ezga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2))
                 else:
+                    print("calculating 3D gradient")
                     gradient_x = -np.sum(1j * omega_ * phase_fact * eps0 * Exg[w] * Exga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2), axis=2)
                     gradient_y = -np.sum(1j * omega_ * phase_fact * eps0 * Eyg[w] * Eyga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2), axis=2)
                     gradient_z = -np.sum(1j * omega_ * phase_fact * eps0 * Ezg[w] * Ezga[w] * self.sim.step_size * (self.design_region[0]["ri max"] ** 2 - self.design_region[0]["ri min"] ** 2), axis=2)
+                    
+                    # plt.imshow(gradient_x.real)
+                    # plt.savefig("gx.png")
+                    # plt.close()
+                    # plt.imshow(gradient_y.real)
+                    # plt.savefig("gy.png")
+                    # plt.close()
+                    # plt.imshow(gradient_z.real)
+                    # plt.savefig("gz.png")
+                    # plt.close()
+
                 gx = jacx(gradient_x.flatten().real)[0]
                 gy = jacy(gradient_y.flatten().real)[0]
                 gz = jacz(gradient_z.flatten().real)[0]
