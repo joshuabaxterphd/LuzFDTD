@@ -1423,7 +1423,7 @@ class FDTD_3D:
                 H2s = []
                 ns = []
 
-                if "mode Ey" not in fr:
+                if "mode Ey" not in fr and "mode Ex" not in fr and "mode Ez" not in fr:
                     for w, wl in enumerate(fr["wavelengths"]):
                         n, E1, E2, H1, H2 = Mode_Solver(epsxx_, epsyy_, epszz_, dx, dy, wl, fr["mode"], tol = self.mode_tol)
                         E1s.append(E1)
