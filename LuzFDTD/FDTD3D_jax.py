@@ -69,6 +69,11 @@ def density_to_perm(dens,epsmin,epsmax):
     return dens * epsmax + (1. - dens) * epsmin
 
 @jax.jit
+def get_max_field(Ex,Ey,Ez):
+    mf = jnp.sqrt(jnp.max(jnp.abs(Ex) ** 2 + jnp.abs(Ey) ** 2 + jnp.abs(Ez) ** 2))
+    return mf
+
+@jax.jit
 def update_E(Ex, Ey, Ez, Hx, Hy, Hz, e_coeff_1x, e_coeff_1y, e_coeff_1z, e_coeff_xy, e_coeff_xz,
                                                 e_coeff_yx, e_coeff_yz, e_coeff_zx, e_coeff_zy, e_coeffx, e_coeffy, e_coeffz,
                                                 psi_Exy, psi_Exz, psi_Eyx, psi_Eyz, psi_Ezx, psi_Ezy,
@@ -373,6 +378,7 @@ class FDTD_3D:
             courant = 0.5,
             movie_update = 10,
             n_cells_pml = 10,
+            default_ri = 1.0,
             complex_sim = False,
             TE = False,
             staircasing = True,
@@ -396,6 +402,7 @@ class FDTD_3D:
         self.dz = self.step_size
         self.dt = self.courant * min([self.dx, self.dy]) / c0
         self.mode_tol = mode_tol
+        self.default_ri = default_ri
     def run(self):
         if self.complex_sim:
             type = complex_type
@@ -449,11 +456,11 @@ class FDTD_3D:
         Inv_dx = 1. / dx
         Inv_dy = 1. / dy
         Inv_dz = 1. / dz
-        epsxx = np.ones(Domain_shape)
-        epsyy = np.ones(Domain_shape)
-        epszz = np.ones(Domain_shape)
-        eps = np.ones(Domain_shape)
-        eps_sub = np.ones(Domain_shape_sub)
+        epsxx = np.ones(Domain_shape) * self.default_ri ** 2
+        epsyy = np.ones(Domain_shape) * self.default_ri ** 2
+        epszz = np.ones(Domain_shape) * self.default_ri ** 2
+        eps = np.ones(Domain_shape) * self.default_ri ** 2
+        eps_sub = np.ones(Domain_shape_sub) * self.default_ri ** 2
         sigma_exx = np.zeros(Domain_shape)
         sigma_eyy = np.zeros(Domain_shape)
         sigma_ezz = np.zeros(Domain_shape)
@@ -1355,9 +1362,10 @@ class FDTD_3D:
                                                                            fr["jmax"], fr["kmin"],
                                                                            fr["kmax"])
 
-            mf = jnp.sqrt(jnp.max(jnp.abs(Ex) ** 2 + jnp.abs(Ey) ** 2 + jnp.abs(Ez) ** 2))
-            if mf > max_field:
-                max_field = mf
+            if n % 10 == 0:
+                mf = get_max_field(Ex,Ey,Ez)
+                if mf > max_field:
+                    max_field = mf
 
             # shutoff simulation early
             if time > min_simulation_time:

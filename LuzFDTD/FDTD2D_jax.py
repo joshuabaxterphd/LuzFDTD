@@ -63,33 +63,39 @@ def add_design_grid(ce,si,x_axis_sub,y_axis_sub):
 def density_to_perm(dens,epsmin,epsmax):
     return dens * epsmax + (1. - dens) * epsmin
 
+
+@jax.jit
+def get_max_field(Ex,Ey,Ez):
+    e = Ex ** 2 + Ey ** 2 + Ez ** 2          
+    return jnp.sqrt(jnp.max(e))
+
 @jax.jit
 def update_H_TE(Hx, Hy, Hz, Ex, Ey, Ez, h_coeff_1, h_coeff_x, h_coeff_y, h_coeff,
                 psi_Hxy, psi_Hyx, bh_y, ch_y, bh_y_f, ch_y_f, bh_x, ch_x, bh_x_f, ch_x_f, Inv_dx, Inv_dy):
     Hx = Hx.at[1:-1, :-1].set(h_coeff_1 * Hx[1:-1, :-1]
-                              - h_coeff_y[:, :-1] * (Ez[1:-1, 1:] - Ez[1:-1, :-1]))
+                              - h_coeff_y * (Ez[1:-1, 1:] - Ez[1:-1, :-1]))
 
     Hy = Hy.at[:-1, 1:-1].set(h_coeff_1 * Hy[:-1, 1:-1]
-                              + h_coeff_x[:-1, :] * (Ez[1:, 1:-1] - Ez[:-1, 1:-1]))
+                              + h_coeff_x * (Ez[1:, 1:-1] - Ez[:-1, 1:-1]))
     # Hx PML along y-direction
-    psi_Hxy = psi_Hxy.at[:, :n_cells_pml - 1, 0].set(psi_Hxy[:, :n_cells_pml - 1, 0] * bh_y[:, :-1]
-                                                     + ch_y[:, :-1] * Inv_dy * (
+    psi_Hxy = psi_Hxy.at[:, :n_cells_pml - 1, 0].set(psi_Hxy[:, :n_cells_pml - 1, 0] * bh_y
+                                                     + ch_y * (
                                                              Ez[:, 1:n_cells_pml] - Ez[:, :n_cells_pml - 1]))
 
-    psi_Hxy = psi_Hxy.at[:, :n_cells_pml - 1, 1].set(psi_Hxy[:, :n_cells_pml - 1, 1] * bh_y_f[:, 1:]
-                                                     + ch_y_f[:, 1:] * Inv_dy * (
+    psi_Hxy = psi_Hxy.at[:, :n_cells_pml - 1, 1].set(psi_Hxy[:, :n_cells_pml - 1, 1] * bh_y_f
+                                                     + ch_y_f * (
                                                              Ez[:, -n_cells_pml + 1:] - Ez[:, -n_cells_pml:-1]))
 
     Hx = Hx.at[:-1, :n_cells_pml - 1].set(Hx[:-1, :n_cells_pml - 1] - h_coeff * psi_Hxy[:-1, :n_cells_pml - 1, 0])
     Hx = Hx.at[:-1, -n_cells_pml:-1].set(Hx[:-1, -n_cells_pml:-1] - h_coeff * psi_Hxy[:-1, :n_cells_pml - 1, 1])
 
     # Hy PML along x-direction
-    psi_Hyx = psi_Hyx.at[:n_cells_pml - 1, :, 0].set(psi_Hyx[:n_cells_pml - 1, :, 0] * bh_x[:-1, :]
-                                                     + ch_x[:-1, :] * Inv_dx * (
+    psi_Hyx = psi_Hyx.at[:n_cells_pml - 1, :, 0].set(psi_Hyx[:n_cells_pml - 1, :, 0] * bh_x
+                                                     + ch_x * (
                                                              Ez[1:n_cells_pml, :] - Ez[:n_cells_pml - 1, :]))
 
-    psi_Hyx = psi_Hyx.at[:n_cells_pml - 1, :, 1].set(psi_Hyx[:n_cells_pml - 1, :, 1] * bh_x_f[1:, :]
-                                                     + ch_x_f[1:, :] * Inv_dx * (
+    psi_Hyx = psi_Hyx.at[:n_cells_pml - 1, :, 1].set(psi_Hyx[:n_cells_pml - 1, :, 1] * bh_x_f
+                                                     + ch_x_f * (
                                                              Ez[-n_cells_pml + 1:, :] - Ez[-n_cells_pml:-1, :]))
 
     Hy = Hy.at[:n_cells_pml - 1, :-1].set(Hy[:n_cells_pml - 1, :-1] + h_coeff * psi_Hyx[:n_cells_pml - 1, :-1, 0])
@@ -100,27 +106,24 @@ def update_H_TE(Hx, Hy, Hz, Ex, Ey, Ez, h_coeff_1, h_coeff_x, h_coeff_y, h_coeff
 def update_H_TM(Hx, Hy, Hz, Ex, Ey, Ez, h_coeff_1, h_coeff_x, h_coeff_y, h_coeff,
                 psi_Hzx, psi_Hzy, bh_y, ch_y, bh_y_f, ch_y_f, bh_x, ch_x, bh_x_f, ch_x_f, Inv_dx, Inv_dy):
     Hz = Hz.at[:-1, :-1].set(h_coeff_1 * Hz[:-1, :-1]
-                             + h_coeff_y[:, :-1] * (Ex[:-1, 1:] - Ex[:-1, :-1])
-                             - h_coeff_x[:-1, :] * (Ey[1:, :-1] - Ey[:-1, :-1]))
+                             + h_coeff_y * (Ex[:-1, 1:] - Ex[:-1, :-1])
+                             - h_coeff_x * (Ey[1:, :-1] - Ey[:-1, :-1]))
     # Hz PML along x-direction
-    psi_Hzx = psi_Hzx.at[:n_cells_pml - 1, :, 0].set(psi_Hzx[:n_cells_pml - 1, :, 0] * bh_x[:-1, :]
-                                       + (Ey[1:n_cells_pml, :] - Ey[:n_cells_pml - 1, :]) * ch_x[:-1,
-                                                                                            :] * Inv_dx)
+    psi_Hzx = psi_Hzx.at[:n_cells_pml - 1, :, 0].set(psi_Hzx[:n_cells_pml - 1, :, 0] * bh_x
+                                       + (Ey[1:n_cells_pml, :] - Ey[:n_cells_pml - 1, :]) * ch_x)
 
-    psi_Hzx = psi_Hzx.at[:n_cells_pml - 1, :, 1].set(psi_Hzx[:n_cells_pml - 1, :, 1] * bh_x_f[1:, :]
-                                       + (Ey[-n_cells_pml + 1:, :] - Ey[-n_cells_pml:-1, :]) * ch_x_f[1:,
-                                                                                               :] * Inv_dx)
+    psi_Hzx = psi_Hzx.at[:n_cells_pml - 1, :, 1].set(psi_Hzx[:n_cells_pml - 1, :, 1] * bh_x_f
+                                       + (Ey[-n_cells_pml + 1:, :] - Ey[-n_cells_pml:-1, :]) * ch_x_f)
 
     Hz = Hz.at[:n_cells_pml - 1, :-1].set(Hz[:n_cells_pml - 1, :-1] - h_coeff * psi_Hzx[:n_cells_pml - 1, :-1, 0])
     Hz = Hz.at[-n_cells_pml:-1, :-1].set(Hz[-n_cells_pml:-1, :-1] - h_coeff * psi_Hzx[:n_cells_pml - 1, :-1, 1])
 
     # Hz PML along y-direction
-    psi_Hzy = psi_Hzy.at[:, :n_cells_pml - 1, 0].set(psi_Hzy[:, :n_cells_pml - 1, 0] * bh_y[:, :-1]
-                                       + (Ex[:, 1:n_cells_pml] - Ex[:, :n_cells_pml - 1]) * ch_y[:,
-                                                                                            :-1] * Inv_dy)
+    psi_Hzy = psi_Hzy.at[:, :n_cells_pml - 1, 0].set(psi_Hzy[:, :n_cells_pml - 1, 0] * bh_y
+                                       + (Ex[:, 1:n_cells_pml] - Ex[:, :n_cells_pml - 1]) * ch_y)
 
-    psi_Hzy = psi_Hzy.at[:, :n_cells_pml - 1, 1].set(psi_Hzy[:, :n_cells_pml - 1, 1] * bh_y_f[:, 1:]
-                                       + ch_y_f[:, 1:, ] * Inv_dy * (
+    psi_Hzy = psi_Hzy.at[:, :n_cells_pml - 1, 1].set(psi_Hzy[:, :n_cells_pml - 1, 1] * bh_y_f
+                                       + ch_y_f  * (
                                                    Ex[:, -n_cells_pml + 1:] - Ex[:, -n_cells_pml:-1]))
 
     Hz = Hz.at[:-1, :n_cells_pml - 1].set(Hz[:-1, :n_cells_pml - 1] + h_coeff * psi_Hzy[:-1, :n_cells_pml - 1, 0])
@@ -187,7 +190,7 @@ def mode_source_Ez_mx(Ez, Hym, signal, e_coeffz, dx, imin, jmin, jmax):
 
 @functools.partial(jax.jit, static_argnums=(6,7,8,9,10,11,12,13,14))
 def update_Edft_TM(Exdft, Eydft, Ex, Ey, omega, time, ww, iminx, imaxx, jminx, jmaxx, iminy, imaxy, jminy, jmaxy):
-    exp_term = jnp.exp(-1j * time * omega)
+    exp_term = jnp.exp(-1j * time * omegas)
     Exdft = Exdft.at[ww].set(Exdft[ww] + Ex[iminx:imaxx, jminx:jmaxx] * exp_term)
     Eydft = Eydft.at[ww].set(Eydft[ww] + Ey[iminy:imaxy, jminy:jmaxy] * exp_term)
     return Exdft, Eydft
@@ -241,11 +244,11 @@ def update_E_TE(Ex, Ey, Ez, Hx, Hy, Hz, e_coeff_1x, e_coeff_1y, e_coeff_1z, e_co
                                + e_coeff_zx[1:-1, 1:-1] * (Hy[1:-1, 1:-1] - Hy[:-2, 1:-1])
                                - e_coeff_zy[1:-1, 1:-1] * (Hx[1:-1, 1:-1] - Hx[1:-1, :-2]))
     # Ez PML along x-direction
-    psi_Ezx = psi_Ezx.at[1:n_cells_pml, :, 0].set(be_x[1:, :] * psi_Ezx[1:n_cells_pml, :, 0] +
-                                                  Inv_dx * ce_x[1:, :] * (
+    psi_Ezx = psi_Ezx.at[1:n_cells_pml, :, 0].set(be_x * psi_Ezx[1:n_cells_pml, :, 0] +
+                                                   ce_x * (
                                                               Hy[1:n_cells_pml, :] - Hy[:n_cells_pml - 1, :]))
-    psi_Ezx = psi_Ezx.at[1:n_cells_pml, :, 1].set(be_x_f[:-1, :] * psi_Ezx[1:n_cells_pml, :, 1] +
-                                                  Inv_dx * ce_x_f[:-1, :] * (
+    psi_Ezx = psi_Ezx.at[1:n_cells_pml, :, 1].set(be_x_f * psi_Ezx[1:n_cells_pml, :, 1] +
+                                                   ce_x_f * (
                                                           Hy[-n_cells_pml:-1, :] - Hy[-n_cells_pml - 1:-2, :]))
 
     Ez = Ez.at[1:n_cells_pml, 1:-1].set(
@@ -254,11 +257,11 @@ def update_E_TE(Ex, Ey, Ez, Hx, Hy, Hz, e_coeff_1x, e_coeff_1y, e_coeff_1z, e_co
         Ez[-n_cells_pml:-1, 1:-1] + e_coeffz[-n_cells_pml:-1, 1:-1] * psi_Ezx[1:n_cells_pml, 1:-1, 1])
 
     # Ez PML along y-direction
-    psi_Ezy = psi_Ezy.at[:, 1:n_cells_pml, 0].set(be_y[:, 1:] * psi_Ezy[:, 1:n_cells_pml, 0] +
-                                                  ce_y[:, 1:] * Inv_dy * (
+    psi_Ezy = psi_Ezy.at[:, 1:n_cells_pml, 0].set(be_y * psi_Ezy[:, 1:n_cells_pml, 0] +
+                                                  ce_y * (
                                                               Hx[:, 1:n_cells_pml] - Hx[:, :n_cells_pml - 1]))
-    psi_Ezy = psi_Ezy.at[:, 1:n_cells_pml, 1].set(be_y_f[:, :-1] * psi_Ezy[:, 1:n_cells_pml, 1] +
-                                                  ce_y_f[:, :-1] * Inv_dy * (
+    psi_Ezy = psi_Ezy.at[:, 1:n_cells_pml, 1].set(be_y_f * psi_Ezy[:, 1:n_cells_pml, 1] +
+                                                  ce_y_f * (
                                                           Hx[:, -n_cells_pml:-1] - Hx[:, -n_cells_pml - 1:-2]))
 
     Ez = Ez.at[1:-1, 1:n_cells_pml].set(
@@ -280,12 +283,12 @@ def update_E_TM(Ex, Ey, Ez, Hx, Hy, Hz, e_coeff_1x, e_coeff_1y, e_coeff_1z, e_co
                               - e_coeff_yx[1:-1, :-1] * (Hz[1:-1, :-1] - Hz[:-2, :-1]))
 
     # Ex PML along y-direction
-    psi_Exy = psi_Exy.at[:, 1:n_cells_pml, 0].set(be_y[:, 1:] * psi_Exy[:, 1:n_cells_pml, 0]
-                                                  + ce_y[:, 1:] * Inv_dy * (
+    psi_Exy = psi_Exy.at[:, 1:n_cells_pml, 0].set(be_y * psi_Exy[:, 1:n_cells_pml, 0]
+                                                  + ce_y  * (
                                                           Hz[:, 1:n_cells_pml] - Hz[:, :n_cells_pml - 1]))
 
-    psi_Exy = psi_Exy.at[:, 1:n_cells_pml, 1].set(be_y_f[:, :-1] * psi_Exy[:, 1:n_cells_pml, 1]
-                                                  + ce_y_f[:, :-1] * Inv_dy * (
+    psi_Exy = psi_Exy.at[:, 1:n_cells_pml, 1].set(be_y_f * psi_Exy[:, 1:n_cells_pml, 1]
+                                                  + ce_y_f  * (
                                                           Hz[:, -n_cells_pml:-1] - Hz[:, -n_cells_pml - 1:-2]))
 
     Ex = Ex.at[:-1, 1:n_cells_pml].set(Ex[:-1, 1:n_cells_pml]
@@ -295,11 +298,11 @@ def update_E_TM(Ex, Ey, Ez, Hx, Hy, Hz, e_coeff_1x, e_coeff_1y, e_coeff_1z, e_co
 
 
     # Ey PML along x-direction
-    psi_Eyx = psi_Eyx.at[1:n_cells_pml, :, 0].set(be_x[1:, :] * psi_Eyx[1:n_cells_pml, :, 0] +
-                                                  Inv_dx * ce_x[1:, :] * (
+    psi_Eyx = psi_Eyx.at[1:n_cells_pml, :, 0].set(be_x * psi_Eyx[1:n_cells_pml, :, 0] +
+                                                   ce_x * (
                                                               Hz[1:n_cells_pml, :] - Hz[:n_cells_pml - 1, :]))
-    psi_Eyx = psi_Eyx.at[1:n_cells_pml, :, 1].set(be_x_f[:-1, :] * psi_Eyx[1:n_cells_pml, :, 1]
-                                                  + Inv_dx * ce_x_f[:-1, :] * (
+    psi_Eyx = psi_Eyx.at[1:n_cells_pml, :, 1].set(be_x_f * psi_Eyx[1:n_cells_pml, :, 1]
+                                                  +  ce_x_f * (
                                                           Hz[-n_cells_pml:-1, :] - Hz[-n_cells_pml - 1:-2, :]))
 
     Ey = Ey.at[1:n_cells_pml, :-1].set(
@@ -326,6 +329,7 @@ class FDTD_2D:
             courant = 0.5,
             movie_update = 10,
             n_cells_pml = 10,
+            default_ri = 1.0,
             complex_sim = False,
             TE = False,
             staircasing = False):
@@ -347,7 +351,8 @@ class FDTD_2D:
         self.dx = self.step_size
         self.dy = self.step_size
         self.dt = self.courant * min([self.dx, self.dy]) / c0
-
+        self.default_ri = default_ri
+        print(default_ri)
     def run(self):
         if self.complex_sim:
             type = complex_type
@@ -393,11 +398,11 @@ class FDTD_2D:
         Inv_dx = 1. / dx
         Inv_dy = 1. / dy
 
-        epsxx = np.ones(Domain_shape)
-        epsyy = np.ones(Domain_shape)
-        epszz = np.ones(Domain_shape)
-        eps = np.ones(Domain_shape)
-        eps_sub = np.ones(Domain_shape_sub)
+        epsxx = np.ones(Domain_shape) * self.default_ri ** 2
+        epsyy = np.ones(Domain_shape) * self.default_ri ** 2
+        epszz = np.ones(Domain_shape) * self.default_ri ** 2
+        eps = np.ones(Domain_shape) * self.default_ri ** 2
+        eps_sub = np.ones(Domain_shape_sub)  * self.default_ri ** 2
         sigma_exx = jnp.zeros(Domain_shape)
         sigma_eyy = jnp.zeros(Domain_shape)
         sigma_ezz = jnp.zeros(Domain_shape)
@@ -653,24 +658,29 @@ class FDTD_2D:
         except:
             print("overwriting images in simulation_images")
 
+        plt.close()
         plt.contourf(x_axis_sub * 1e6, y_axis_sub * 1e6, eps_sub.transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
+        plt.colorbar()
         plt.savefig("simulation_images/sim.png")
         plt.close()
         plt.contourf(x_axis * 1e6, y_axis * 1e6, epsxx.transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
+        plt.colorbar()
         plt.savefig("simulation_images/simxx.png")
         plt.close()
         plt.contourf(x_axis * 1e6, y_axis * 1e6, epsyy.transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
+        plt.colorbar()
         plt.savefig("simulation_images/simyy.png")
         plt.close()
         plt.contourf(x_axis * 1e6, y_axis * 1e6, epszz.transpose(), 200)
         plt.xlabel("x [um]")
         plt.ylabel("y [um]")
+        plt.colorbar()
         plt.savefig("simulation_images/simzz.png")
         plt.close()
 
@@ -748,39 +758,40 @@ class FDTD_2D:
                 s["jmin"] = jmin
                 s["jmax"] = jmax
 
-                n, E1, E2, H1, H2 = Mode_Solver(epsxx_, epsyy_, epszz_, dx, dy, s["wavelength"], s["mode"])
+                if "Ey" not in s and "Ex" not in s and "Ez" not in s:
+                    n, E1, E2, H1, H2 = Mode_Solver(epsxx_, epsyy_, epszz_, dx, dy, s["wavelength"], s["mode"])
+                    print(n)
+                    if type.startswith("float"):
+                        E1 = E1.real
+                        E2 = E2.real
+                        H1 = H1.real
+                        H2 = H2.real
 
-                if type.startswith("float"):
-                    E1 = E1.real
-                    E2 = E2.real
-                    H1 = H1.real
-                    H2 = H2.real
+                    norm = 1.0
+                    s["mode index"] = n
+                    if s["direction"] == "+x":
+                        s["Ey"] = jnp.array(E1.copy()[:, 0]) / norm
+                        s["Ez"] = jnp.array(E2.copy()[:, 0]) / norm
+                        s["Hy"] = jnp.array(H1.copy()[:, 0]) / norm
+                        s["Hz"] = jnp.array(H2.copy()[:, 0])/ norm
+                    elif s["direction"] == "-x":
+                        s["Ey"] = jnp.array(E1.copy()[:, 0]) / norm
+                        s["Ez"] = jnp.array(E2.copy()[:, 0]) / norm
+                        s["Hy"] = -jnp.array(H1.copy()[:, 0]) / norm
+                        s["Hz"] = -jnp.array(H2.copy()[:, 0]) / norm
+                    elif s["direction"] == "+y":
+                        s["Ex"] = jnp.array(E1.copy()[:, 0]) / norm
+                        s["Ez"] = jnp.array(E2.copy()[:, 0]) / norm
+                        s["Hx"] = -jnp.array(H1.copy()[:, 0]) / norm
+                        s["Hz"] = -jnp.array(H2.copy()[:, 0]) / norm
+                    elif s["direction"] == "-y":
+                        s["Ex"] = jnp.array(E1.copy()[:, 0]) / norm
+                        s["Ez"] = jnp.array(E2.copy()[:, 0]) / norm
+                        s["Hx"] = jnp.array(H1.copy()[:, 0]) / norm
+                        s["Hz"] = jnp.array(H2.copy()[:, 0]) / norm
 
-                norm = 1.0
-                s["mode index"] = n
-                if s["direction"] == "+x":
-                    s["Ey"] = jnp.array(E1.copy()[:, 0]) / norm
-                    s["Ez"] = jnp.array(E2.copy()[:, 0]) / norm
-                    s["Hy"] = jnp.array(H1.copy()[:, 0]) / norm
-                    s["Hz"] = jnp.array(H2.copy()[:, 0])/ norm
-                elif s["direction"] == "-x":
-                    s["Ey"] = jnp.array(E1.copy()[:, 0]) / norm
-                    s["Ez"] = jnp.array(E2.copy()[:, 0]) / norm
-                    s["Hy"] = -jnp.array(H1.copy()[:, 0]) / norm
-                    s["Hz"] = -jnp.array(H2.copy()[:, 0]) / norm
-                elif s["direction"] == "+y":
-                    s["Ex"] = jnp.array(E1.copy()[:, 0]) / norm
-                    s["Ez"] = jnp.array(E2.copy()[:, 0]) / norm
-                    s["Hx"] = -jnp.array(H1.copy()[:, 0]) / norm
-                    s["Hz"] = -jnp.array(H2.copy()[:, 0]) / norm
-                elif s["direction"] == "-y":
-                    s["Ex"] = jnp.array(E1.copy()[:, 0]) / norm
-                    s["Ez"] = jnp.array(E2.copy()[:, 0]) / norm
-                    s["Hx"] = jnp.array(H1.copy()[:, 0]) / norm
-                    s["Hz"] = jnp.array(H2.copy()[:, 0]) / norm
-
-                s["t_offset"] = n * self.step_size / (2 * c0)
-                s["Z"] = imp0 / n
+                    s["t_offset"] = n * self.step_size / (2 * c0)
+                    s["Z"] = imp0 / n
 
         Ex = jnp.zeros(Domain_shape, dtype=type)
         Ey = jnp.zeros(Domain_shape, dtype=type)
@@ -858,25 +869,25 @@ class FDTD_2D:
 
         kappa_e_x = jnp.array(np.expand_dims(kappa_e_x, axis=1))
         kappa_e_y = jnp.array(np.expand_dims(kappa_e_y, axis=0))
-        ce_x = jnp.array(np.expand_dims(ce_x, axis=1))
-        ce_y = jnp.array(np.expand_dims(ce_y, axis=0))
-        be_x = jnp.array(np.expand_dims(be_x, axis=1))
-        be_y = jnp.array(np.expand_dims(be_y, axis=0))
-        be_x_f = jnp.array(np.expand_dims(be_x_f, axis=1))
-        be_y_f = jnp.array(np.expand_dims(be_y_f, axis=0))
-        ce_x_f = jnp.array(np.expand_dims(ce_x_f, axis=1))
-        ce_y_f = jnp.array(np.expand_dims(ce_y_f, axis=0))
+        ce_x = jnp.array(np.expand_dims(ce_x, axis=1))[1:, :] * Inv_dx
+        ce_y = jnp.array(np.expand_dims(ce_y, axis=0))[:, 1:] * Inv_dy
+        be_x = jnp.array(np.expand_dims(be_x, axis=1))[1:, :]
+        be_y = jnp.array(np.expand_dims(be_y, axis=0))[:, 1:]
+        be_x_f = jnp.array(np.expand_dims(be_x_f, axis=1))[:-1, :]
+        be_y_f = jnp.array(np.expand_dims(be_y_f, axis=0))[:, :-1]
+        ce_x_f = jnp.array(np.expand_dims(ce_x_f, axis=1))[:-1, :] * Inv_dx
+        ce_y_f = jnp.array(np.expand_dims(ce_y_f, axis=0))[:, :-1] * Inv_dy
 
         kappa_h_x = jnp.array(np.expand_dims(kappa_h_x, axis=1))
         kappa_h_y = jnp.array(np.expand_dims(kappa_h_y, axis=0))
-        ch_x = jnp.array(np.expand_dims(ch_x, axis=1))
-        ch_y = jnp.array(np.expand_dims(ch_y, axis=0))
-        bh_x = jnp.array(np.expand_dims(bh_x, axis=1))
-        bh_y = jnp.array(np.expand_dims(bh_y, axis=0))
-        ch_x_f = jnp.array(np.expand_dims(ch_x_f, axis=1))
-        ch_y_f = jnp.array(np.expand_dims(ch_y_f, axis=0))
-        bh_x_f = jnp.array(np.expand_dims(bh_x_f, axis=1))
-        bh_y_f = jnp.array(np.expand_dims(bh_y_f, axis=0))
+        ch_x = jnp.array(np.expand_dims(ch_x, axis=1))[:-1, :] * Inv_dx
+        ch_y = jnp.array(np.expand_dims(ch_y, axis=0))[:, :-1] * Inv_dy
+        bh_x = jnp.array(np.expand_dims(bh_x, axis=1))[:-1, :] 
+        bh_y = jnp.array(np.expand_dims(bh_y, axis=0))[:, :-1] 
+        ch_x_f = jnp.array(np.expand_dims(ch_x_f, axis=1))[1:, :] * Inv_dx
+        ch_y_f = jnp.array(np.expand_dims(ch_y_f, axis=0))[:, 1:] * Inv_dy
+        bh_x_f = jnp.array(np.expand_dims(bh_x_f, axis=1))[1:, :] 
+        bh_y_f = jnp.array(np.expand_dims(bh_y_f, axis=0))[:, 1:] 
 
         # Electric field update coefficients
         denominatorx = eps0 * epsxx / dt + sigma_exx / 2
@@ -899,8 +910,8 @@ class FDTD_2D:
         denominator_h = mu0 / dt + sigma_h / 2
         h_coeff_1 = (mu0 / dt - sigma_h / 2) / denominator_h
         h_coeff = 1.0 / (denominator_h)
-        h_coeff_x = h_coeff / (dx * kappa_h_x)
-        h_coeff_y = h_coeff / (dy * kappa_h_y)
+        h_coeff_x = h_coeff / (dx * kappa_h_x)[:-1, :] 
+        h_coeff_y = h_coeff / (dy * kappa_h_y)[:, :-1] 
 
         probe = []
 
@@ -1097,17 +1108,19 @@ class FDTD_2D:
                         movie["E"][int(round(n / self.movie_update))] = get_movie_frame(Ex, Ey, Ez, movie["imin"], movie["imax"], 
                                                                                                movie["jmin"], movie["jmax"])
 
-                mf = jnp.sqrt(jnp.max(jnp.abs(Ex) ** 2 + jnp.abs(Ey) ** 2 + jnp.abs(Ez) ** 2))
-                if mf > max_field:
-                    max_field = mf
 
+                if n % 100 == 0:
+                    mf = get_max_field(Ex,Ey,Ez)
+                    if mf > max_field:
+                        max_field = mf
+                        
                 # shutoff simulation early
                 if time > min_simulation_time:
                     if mf < self.cutoff * max_field:
                         print("Electric field below threshold, breaking")
                         break
 
-                if n % 100 == 0:
+                if n % 1000 == 0:
                     print(n, jnp.max(np.abs(Ex)), jnp.max(np.abs(Ey)), jnp.max(np.abs(Ez)), max_field, mf / max_field)
 
         else:
@@ -1192,10 +1205,10 @@ class FDTD_2D:
                         movie["E"][int(round(n / self.movie_update))] = get_movie_frame(Ex, Ey, Ez, movie["imin"], movie["imax"], 
                                                                                                movie["jmin"], movie["jmax"])
 
-
-                mf = jnp.sqrt(jnp.max(jnp.abs(Ex) ** 2 + jnp.abs(Ey) ** 2 + jnp.abs(Ez) ** 2))
-                if mf > max_field:
-                    max_field = mf
+                if n % 100 == 0:
+                    mf = get_max_field(Ex,Ey,Ez)
+                    if mf > max_field:
+                        max_field = mf
 
                 # shutoff simulation early
                 if time > min_simulation_time:
@@ -1203,7 +1216,7 @@ class FDTD_2D:
                         print("Electric field below threshold, breaking")
                         break
 
-                if n % 100 == 0:
+                if n % 1000 == 0:
                     print(n, jnp.max(np.abs(Ex)), jnp.max(np.abs(Ey)), jnp.max(np.abs(Ez)), max_field, mf / max_field)
 
         end = time_mod.time()
@@ -1248,6 +1261,7 @@ class FDTD_2D:
 
                 if "mode Ey" not in fr:
                     for w, wl in enumerate(fr["wavelengths"]):
+                        print(fr["mode"], wl)
                         n, E1, E2, H1, H2 = Mode_Solver(epsxx_, epsyy_, epszz_, dx, dy, wl, fr["mode"])
                         E1s.append(E1)
                         E2s.append(E2)
